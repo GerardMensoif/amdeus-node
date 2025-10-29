@@ -186,6 +186,11 @@ defmodule API.TX do
             Map.put(a, :args, args)
         end)
         tx = put_in(tx, [:tx, :actions], actions)
-        tx = put_in(tx, [:metadata, :entry_hash], Base58.encode(tx.metadata.entry_hash))
+        # Encoder metadata seulement si elle existe
+        tx = if Map.has_key?(tx, :metadata) do
+            put_in(tx, [:metadata, :entry_hash], Base58.encode(tx.metadata.entry_hash))
+        else
+            tx
+        end
     end
 end
