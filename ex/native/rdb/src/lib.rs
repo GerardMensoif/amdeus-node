@@ -10,13 +10,15 @@ use rustler::{
 
 pub use rust_rocksdb::{TransactionDB, MultiThreaded, TransactionDBOptions, Options,
     Transaction, TransactionOptions, WriteOptions, CompactOptions, BottommostLevelCompaction,
-    DBRawIteratorWithThreadMode, BoundColumnFamily,
+    DBRawIteratorWithThreadMode, BoundColumnFamily, ReadOptions,
     Cache, LruCacheOptions, BlockBasedOptions, DBCompressionType, BlockBasedIndexType,
     ColumnFamilyDescriptor, AsColumnFamilyRef};
 
 use std::path::Path;
 use std::ptr::NonNull;
 use std::sync::{Mutex};
+
+use vecpak_ex;
 
 use crate::consensus::consensus_muts;
 
@@ -153,7 +155,7 @@ fn open_transaction_db<'a>(env: Env<'a>, path: String, cf_names: Vec<String>) ->
     db_opts.create_missing_column_families(true);
     db_opts.set_max_open_files(30000);
     //more threads
-    db_opts.increase_parallelism(4);
+    db_opts.increase_parallelism(2);
     db_opts.set_max_background_jobs(2);
 
     db_opts.set_max_total_wal_size(2 * 1024 * 1024 * 1024); // 2GB
@@ -174,7 +176,7 @@ fn open_transaction_db<'a>(env: Env<'a>, path: String, cf_names: Vec<String>) ->
     db_opts.set_level_zero_file_num_compaction_trigger(8);
     db_opts.set_level_zero_slowdown_writes_trigger(30);
     db_opts.set_level_zero_stop_writes_trigger(100);
-    db_opts.set_max_subcompactions(2);
+    db_opts.set_max_subcompactions(1);
 
     //db_opts.set_level_compaction_dynamic_level_bytes(false);
 
@@ -231,7 +233,7 @@ fn open_transaction_db<'a>(env: Env<'a>, path: String, cf_names: Vec<String>) ->
     cf_opts.set_level_zero_file_num_compaction_trigger(20);
     cf_opts.set_level_zero_slowdown_writes_trigger(40);
     cf_opts.set_level_zero_stop_writes_trigger(100);
-    cf_opts.set_max_subcompactions(2);
+    cf_opts.set_max_subcompactions(1);
     //cf_opts.set_periodic_compaction_seconds(0);
 
     //cf_opts.set_level_compaction_dynamic_level_bytes(false);
@@ -278,6 +280,14 @@ fn close_db(db: ResourceArc<DbResource>) -> NifResult<Atom> {
         std::ptr::drop_in_place(ptr);
     }
     Ok(atoms::ok())
+}
+
+#[rustler::nif(schedule = "DirtyCpu")]
+fn drop_cf<'a>(env: Env<'a>, db: ResourceArc<DbResource>, cf_name: String) -> NifResult<Term<'a>> {
+    match db.db.drop_cf(cf_name.as_str()) {
+        Ok(()) => Ok(atoms::ok().encode(env)),
+        Err(e) => Err(to_nif_rdb_err(e)),
+    }
 }
 
 #[rustler::nif]
@@ -368,6 +378,28 @@ fn get_cf<'a>(env: Env<'a>, cf: ResourceArc<CfResource>, key: Binary) -> NifResu
             Ok((atoms::ok(), Binary::from_owned(ob, env)).encode(env))
         },
         Ok(None) => Ok((atoms::ok(), atoms::nil()).encode(env)),
+        Err(e) => Err(to_nif_rdb_err(e)),
+    }
+}
+
+#[rustler::nif]
+fn exists<'a>(env: Env<'a>, db: ResourceArc<DbResource>, key: Binary) -> NifResult<Term<'a>> {
+    let mut ro = ReadOptions::default();
+    ro.fill_cache(false);
+    match db.db.get_pinned_opt(key.as_slice(), &ro) {
+        Ok(Some(_)) => Ok((atoms::ok(), true).encode(env)),
+        Ok(None) => Ok((atoms::ok(), false).encode(env)),
+        Err(e) => Err(to_nif_rdb_err(e)),
+    }
+}
+
+#[rustler::nif]
+fn exists_cf<'a>(env: Env<'a>, cf: ResourceArc<CfResource>, key: Binary) -> NifResult<Term<'a>> {
+    let mut ro = ReadOptions::default();
+    ro.fill_cache(false);
+    match cf.db.db.get_pinned_cf_opt(&*cf, key.as_slice(), &ro) {
+        Ok(Some(_)) => Ok((atoms::ok(), true).encode(env)),
+        Ok(None) => Ok((atoms::ok(), false).encode(env)),
         Err(e) => Err(to_nif_rdb_err(e)),
     }
 }
@@ -492,6 +524,34 @@ fn transaction_get_cf<'a>(env: Env<'a>, tx: ResourceArc<TxResource>, cf: Resourc
         Ok(None) => Ok((atoms::ok(), atoms::nil()).encode(env)),
         Err(e) => Err(to_nif_rdb_err(e)),
     }
+}
+
+#[rustler::nif]
+fn transaction_exists<'a>(env: Env<'a>, tx: ResourceArc<TxResource>, key: Binary) -> NifResult<Term<'a>> {
+    let guard = tx.tx.lock().unwrap();
+    let txn = guard.as_ref().ok_or_else(|| to_nif_err(atoms::mutex_closed()))?;
+    let mut ro = ReadOptions::default();
+    ro.fill_cache(false);
+    let rustlol = match txn.get_pinned_opt(key.as_slice(), &ro) {
+        Ok(Some(_)) => Ok((atoms::ok(), true).encode(env)),
+        Ok(None) => Ok((atoms::ok(), false).encode(env)),
+        Err(e) => Err(to_nif_rdb_err(e)),
+    };
+    rustlol
+}
+
+#[rustler::nif]
+fn transaction_exists_cf<'a>(env: Env<'a>, tx: ResourceArc<TxResource>, cf: ResourceArc<CfResource>, key: Binary) -> NifResult<Term<'a>> {
+    let guard = tx.tx.lock().unwrap();
+    let txn = guard.as_ref().ok_or_else(|| to_nif_err(atoms::mutex_closed()))?;
+    let mut ro = ReadOptions::default();
+    ro.fill_cache(false);
+    let rustlol = match txn.get_pinned_cf_opt(&*cf, key.as_slice(), &ro) {
+        Ok(Some(_)) => Ok((atoms::ok(), true).encode(env)),
+        Ok(None) => Ok((atoms::ok(), false).encode(env)),
+        Err(e) => Err(to_nif_rdb_err(e)),
+    };
+    rustlol
 }
 
 #[rustler::nif]
@@ -648,7 +708,7 @@ fn apply_entry<'a>(env: Env<'a>, db: ResourceArc<DbResource>, next_entry_trimmed
 #[rustler::nif]
 fn vecpak_encode<'a>(env: Env<'a>, map: Term<'a>) -> Result<Term<'a>, Error> {
     let mut buf = Vec::with_capacity(1024);
-    model::_vecpak_ex::encode_term(env, &mut buf, map)?;
+    vecpak_ex::encode_term(env, &mut buf, map)?;
 
     let mut ob = OwnedBinary::new(buf.len()).ok_or_else(|| Error::Term(Box::new("alloc failed")))?;
     ob.as_mut_slice().copy_from_slice(&buf);
@@ -658,7 +718,7 @@ fn vecpak_encode<'a>(env: Env<'a>, map: Term<'a>) -> Result<Term<'a>, Error> {
 
 #[rustler::nif]
 fn vecpak_decode<'a>(env: Env<'a>, bin: Binary) -> Result<Term<'a>, Error> {
-    let term = model::_vecpak_ex::decode_term_from_slice(env, bin.as_slice())?;
+    let term = vecpak_ex::decode_term_from_slice(env, bin.as_slice())?;
     Ok(term.encode(env))
 }
 
