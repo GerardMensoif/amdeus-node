@@ -129,7 +129,10 @@ pub fn call_daily_checkin(env: &mut crate::consensus::consensus_apply::ApplyEnv,
         }
     } else if delta > 2 {
         kv_put(env, &bcat(&[b"bic:lockup_prime:next_checkin_epoch:", &env.caller_env.account_caller]), env.caller_env.entry_epoch.saturating_add(2).to_string().as_bytes());
-        kv_put(env, &bcat(&[b"bic:lockup_prime:daily_streak:", &env.caller_env.account_caller]), b"0");
+        kv_put(env, &bcat(&[b"bic:lockup_prime:daily_streak:", &env.caller_env.account_caller]), b"1");
+
+        let daily_bonus = total_unlock_amount / 100;
+        mint(env, env.caller_env.account_caller.to_vec().as_slice(), daily_bonus as i128, b"PRIME");
     } else {
         //already checked in for the day, 2 epoch window
     }

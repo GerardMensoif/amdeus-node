@@ -34,6 +34,7 @@ pub fn call_lock(env: &mut crate::consensus::consensus_apply::ApplyEnv, args: Ve
     if amount > balance(env, &env.caller_env.account_caller.clone(), &symbol) { panic_any("insufficient_funds") }
 
     let unlock_height = env.caller_env.entry_height + duration;
+    kv_increment(env, &bcat(&[b"account:", &env.caller_env.account_caller.clone(), b":balance:", symbol]), -amount);
     create_lock(env, receiver, amount, symbol, unlock_height)
 }
 

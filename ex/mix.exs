@@ -12,7 +12,6 @@ defmodule Ama.MixProject do
       deps: deps(),
       build_embedded: Mix.env == :prod,
       releases: [{@app, release()}],
-      preferred_cli_env: [release: :prod]
     ]
   end
 
@@ -57,5 +56,9 @@ defmodule Ama.MixProject do
         start_command: "start_iex"
       ],
     ]
+  end
+
+  def cli do
+    [preferred_envs: [release: :prod]]
   end
 end

@@ -53,6 +53,7 @@ defmodule RocksDB do
             end)
         end
 
+        RDB.iterator_close(it)
         case seek_res do
             {:ok, <<^prefix::binary, next_key::binary>>, value} ->
                 value = if opts[:term] do :erlang.binary_to_term(value, [:safe]) else value end
@@ -78,6 +79,7 @@ defmodule RocksDB do
             end)
         end
 
+        RDB.iterator_close(it)
         case seek_res do
             {:ok, <<^prefix::binary, prev_key::binary>>, value} ->
                 value = if opts[:term] do :erlang.binary_to_term(value, [:safe]) else value end
@@ -89,6 +91,7 @@ defmodule RocksDB do
     def get_prev_or_first(prefix, key, opts) do
         {:ok, it} = iterator(opts)
         res = RDB.iterator_move(it, {:seek_for_prev, "#{prefix}#{key}"})
+        RDB.iterator_close(it)
         case res do
             {:ok, <<^prefix::binary, prev_key::binary>>, value} ->
                 value = if opts[:term] do :erlang.binary_to_term(value, [:safe]) else value end
@@ -144,7 +147,9 @@ defmodule RocksDB do
     def get_prefix(prefix, opts) do
         {:ok, it} = iterator(opts)
         res = RDB.iterator_move(it, {:seek, prefix})
-        get_prefix_1(prefix, it, res, opts, [])
+        result = get_prefix_1(prefix, it, res, opts, [])
+        RDB.iterator_close(it)
+        result
     end
     defp get_prefix_1(prefix, it, res, opts, acc) do
         case res do
@@ -161,7 +166,9 @@ defmodule RocksDB do
     def delete_prefix(prefix, opts) do
         {:ok, it} = iterator(opts)
         res = RDB.iterator_move(it, {:seek, prefix})
-        delete_prefix_1(prefix, it, res, opts)
+        result = delete_prefix_1(prefix, it, res, opts)
+        RDB.iterator_close(it)
+        result
     end
     defp delete_prefix_1(prefix, it, res, opts) do
         case res do
@@ -207,6 +214,7 @@ defmodule RocksDB do
         {:ok, it} = iterator(opts)
 
         seek_res = RDB.iterator_move(it, {:seek, key})
+        RDB.iterator_close(it)
         seek_res = case seek_res do
             {:ok, next_key, value} -> {next_key, value}
             other -> {nil, nil}
@@ -239,7 +247,9 @@ defmodule RocksDB do
     def dump(cf) do
         {:ok, it} = RDB.iterator_cf(cf)
         res = RDB.iterator_move(it, :first)
-        dump_1(it, res, [])
+        result = dump_1(it, res, [])
+        RDB.iterator_close(it)
+        result
     end
     defp dump_1(it, res, acc) do
         case res do

@@ -66,7 +66,7 @@ pub struct ItResource {
   db: ResourceArc<DbResource>,
   cf: Option<ResourceArc<CfResource>>,
   tx: Option<ResourceArc<TxResource>>,
-  it: Mutex<IterInner>,
+  it: Mutex<Option<IterInner>>,
 }
 unsafe impl Send for ItResource {} unsafe impl Sync for ItResource {}
 
@@ -92,13 +92,17 @@ impl ItResource {
           IterInner::Db(unsafe { std::mem::transmute::<DbIter<'_>, DbIter<'static>>(real) })
       };
 
-      ResourceArc::new(Self { db, tx, cf, it: Mutex::new(it) })
+      ResourceArc::new(Self { db, tx, cf, it: Mutex::new(Some(it)) })
   }
 }
 
 macro_rules! with_it { ($s:expr, $it:ident => $body:expr) => {{
   let mut g = $s.it.lock().unwrap();
-  match &mut *g { IterInner::Db($it) => $body, IterInner::Tx($it) => $body }
+  match &mut *g {
+      Some(IterInner::Db($it)) => $body,
+      Some(IterInner::Tx($it)) => $body,
+      None => panic!("rocksdb iterator used after close")
+  }
 }}}
 
 #[inline]
@@ -470,6 +474,13 @@ fn iterator<'a>(env: Env<'a>, db: ResourceArc<DbResource>) -> NifResult<Term<'a>
 }
 
 #[rustler::nif]
+fn iterator_close(it_resource: ResourceArc<ItResource>) -> Atom {
+    let mut guard = it_resource.it.lock().unwrap();
+    *guard = None;
+    atoms::ok()
+}
+
+#[rustler::nif]
 fn iterator_cf<'a>(env: Env<'a>, cf: ResourceArc<CfResource>) -> NifResult<Term<'a>> {
     let res = ItResource::new(cf.db.clone(), None, Some(cf.clone()));
     Ok((atoms::ok(), res).encode(env))
@@ -659,14 +670,16 @@ fn iterator_move<'a>(env: Env<'a>, res: ResourceArc<ItResource>, action: Term<'a
 
     let mut g = res.it.lock().unwrap();
     let is_valid = match &*g {
-        IterInner::Db(it) => it.valid(),
-        IterInner::Tx(it) => it.valid(),
+        Some(IterInner::Db(it)) => it.valid(),
+        Some(IterInner::Tx(it)) => it.valid(),
+        None => false,
     };
     if !is_valid { return Ok((atoms::error(), atoms::invalid_iterator()).encode(env)); }
 
     let (k_opt, v_opt) = match &mut *g {
-        IterInner::Db(it) => (it.key(), it.value()),
-        IterInner::Tx(it) => (it.key(), it.value()),
+        Some(IterInner::Db(it)) => (it.key(), it.value()),
+        Some(IterInner::Tx(it)) => (it.key(), it.value()),
+        None => (None, None), // If closed, return no data
     };
     match (k_opt, v_opt) {
         (Some(k), Some(v)) => {

@@ -25,6 +25,7 @@ defmodule RDB do
   def delete_cf(_cf, _key), do: :erlang.nif_error(:nif_not_loaded)
   def delete_range_cf(_cf, _start_key, _end_key, _compact), do: :erlang.nif_error(:nif_not_loaded)
   def iterator(_db), do: :erlang.nif_error(:nif_not_loaded)
+  def iterator_close(_it), do: :erlang.nif_error(:nif_not_loaded)
   def iterator_cf(_cf), do: :erlang.nif_error(:nif_not_loaded)
   def iterator_move(_it, _action), do: :erlang.nif_error(:nif_not_loaded)
   def transaction(_db), do: :erlang.nif_error(:nif_not_loaded)

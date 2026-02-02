@@ -19,7 +19,7 @@ fn epoch_emission_1(epoch: u64, acc: i128) -> i128 {
     if epoch == 0 {
         acc
     } else {
-        let sub = acc.saturating_mul(333) / 1_000_000;
+        let sub = acc.checked_mul(333).expect("i128_overflow") / 1_000_000;
         let emitted = acc.saturating_sub(sub);
         epoch_emission_1(epoch - 1, emitted)
     }

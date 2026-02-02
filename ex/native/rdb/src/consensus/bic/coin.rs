@@ -7,13 +7,13 @@ pub const DECIMALS: u32 = 9;
 pub const BURN_ADDRESS: [u8; 48] = [0u8; 48];
 
 pub fn to_flat(coins: i128) -> i128 {
-    coins.saturating_mul(1_000_000_000)
+    coins.checked_mul(1_000_000_000).expect("i128_overflow")
 }
 pub fn to_cents(coins: i128) -> i128 {
-    coins.saturating_mul(10_000_000)
+    coins.checked_mul(10_000_000).expect("i128_overflow")
 }
 pub fn to_tenthousandth(coins: i128) -> i128 {
-    coins.saturating_mul(100_000)
+    coins.checked_mul(100_000).expect("i128_overflow")
 }
 pub fn from_flat(coins: i128) -> f64 {
     let whole = (coins / 1_000_000_000) as f64;
